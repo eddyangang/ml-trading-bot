@@ -1,37 +1,28 @@
-import os
-# from alpaca.trading.client import TradingClient
-from dotenv import load_dotenv
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import torch
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-# from alpaca.data.historical import CryptoHistoricalDataClient
-# from alpaca.data.requests import CryptoLatestQuoteRequest
-from alpaca.data.live.crypto import CryptoDataStream
+tokenizer = AutoTokenizer.from_pretrained("ProsusAI/finbert")
+model = AutoModelForSequenceClassification.from_pretrained("ProsusAI/finbert").to(device)
+labels = ["positive", "negative", "neutral"]
 
-load_dotenv()
-API_KEY=os.getenv("API_KEY")
-SECRET=os.getenv("SECRET")
+def estimate_sentiment(news):
+    if news:
+        tokens = tokenizer(news, return_tensors="pt", padding=True).to(device)
 
-# keys are required for live data
-crypto_stream = CryptoDataStream(API_KEY, SECRET)
-
-async def my_print(data):
-    # quote data will arrive here
-    print(data)
-
-crypto_stream.subscribe_quotes(my_print, "BTC/USD")
-crypto_stream.run()
-# no keys required
-# client = CryptoHistoricalDataClient()
-
-# single symbol request
-# request_params = CryptoLatestQuoteRequest(symbol_or_symbols="ETH/USD")
-
-# latest_quote = client.get_crypto_latest_quote(request_params)
-
-# must use symbol to access even though it is single symbol
-# latest = latest_quote["ETH/USD"].ask_price
+        result = model(tokens["input_ids"], attention_mask=tokens["attention_mask"])[
+            "logits"
+        ]
+        result = torch.nn.functional.softmax(torch.sum(result, 0), dim=-1)
+        probability = result[torch.argmax(result)]
+        sentiment = labels[torch.argmax(result)]
+        return probability, sentiment
+    else:
+        return 0, labels[-1]
 
 
-# trading_client = TradingClient(API_KEY, SECRET)
-# print(latest)
-# print(trading_client.get_account().account_number)
-# print(trading_client.get_account().buying_power)
+if __name__ == "__main__":
+    tensor, sentiment = estimate_sentiment(['markets responded negatively to the news!','traders were displeased!'])
+    print(tensor, sentiment)
+    print(torch.cuda.is_available())
+
