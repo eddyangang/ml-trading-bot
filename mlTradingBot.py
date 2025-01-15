@@ -6,6 +6,7 @@ from lumibot.strategies.strategy import Strategy
 from datetime import datetime 
 from alpaca_trade_api import REST 
 from timedelta import Timedelta 
+from sentiment import estimate_sentiment
 
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("SECRET")
@@ -16,7 +17,7 @@ ALPACA_CREDS = {
     "PAPER": True
 }
 class MLTrader(Strategy): 
-    def initialize(self, symbol:str="ETH/USD ", cash_at_risk:float=.5): 
+    def initialize(self, symbol:str="SPY", cash_at_risk:float=.5): 
         self.symbol = symbol
         self.sleeptime = "24H" 
         self.last_trade = None 
@@ -27,7 +28,15 @@ class MLTrader(Strategy):
         today = self.get_datetime()
         three_days_prior = today - Timedelta(days=6)
         return today.strftime('%Y-%m-%d'), three_days_prior.strftime('%Y-%m-%d')
-
+    
+    def get_sentiment(self): 
+        today, three_days_prior = self.get_dates()
+        news = self.api.get_news(symbol=self.symbol, 
+                                 start=three_days_prior, 
+                                 end=today) 
+        news = [ev.__dict__["_raw"]["headline"] for ev in news]
+        probability, sentiment = estimate_sentiment(news)
+        return probability, sentiment     
     
     def position_sizing(self): 
         cash = self.get_cash() 
@@ -37,7 +46,9 @@ class MLTrader(Strategy):
     
     def on_trading_iteration(self):
         cash, last_price, quantity = self.position_sizing() 
+        probability, sentiment = self.get_sentiment()
         if cash > last_price: 
+            if sentiment == "negative" and probability > .8: 
                 if self.last_trade == None:
                     order = self.create_order(
                         self.symbol,
@@ -50,6 +61,7 @@ class MLTrader(Strategy):
                     self.submit_order(order)
                     self.last_trade ="buy"
 
+            elif sentiment == "positive" and probability > .8: 
                 if self.last_trade == "buy": 
                     self.sell_all() 
                     order = self.create_order(
@@ -74,5 +86,5 @@ strategy.backtest(
     YahooDataBacktesting, 
     start_date, 
     end_date, 
-    parameters={"symbol":"ETH/USD", "cash_at_risk":.5}
+    parameters={"symbol":"SPY", "cash_at_risk":.5}
 )
